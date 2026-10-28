@@ -1,0 +1,85 @@
+# expect: WS-02 WS-03 WS-05 WS-06 WS-08 (WS-01 is inherited from pod-level runAsNonRoot)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: insecure-initcontainer
+  namespace: accounts
+  labels:
+    app.kubernetes.io/name: accounts-api
+spec:
+  replicas: 3
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: accounts-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: accounts-api
+    spec:
+      serviceAccountName: accounts-api
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: accounts-api
+        image: registry.example.com/demo@sha256:ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          allowPrivilegeEscalation: false
+          privileged: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        env:
+        - name: AWS_REGION
+          value: ap-south-1
+        - name: DB_SECRET_ID
+          value: accounts-api/prod/db
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir:
+          sizeLimit: 64Mi
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: accounts-api
+      initContainers:
+      - name: init
+        image: busybox:1.36
+        command:
+        - sh

@@ -1,0 +1,57 @@
+# Default deny + explicit allows for namespace "accounts". Addresses T03 (lateral movement), T08 (egress exfil).
+# All CIDRs are PLACEHOLDERS (RFC1918/documentation ranges) - replace with real VPC values.
+# Requires a CNI that enforces NetworkPolicy (e.g. VPC CNI with network policy enabled, Cilium, Calico).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: accounts
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: accounts-api-allow
+  namespace: accounts
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: accounts-api
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # ALB (target-type ip) sends traffic from the ALB subnets. Scope to those subnets only.
+    # Limitation: CIDR-level only; CloudFront/WAF restriction is enforced at the ALB SG (managed prefix list), not here.
+    - from:
+        - ipBlock: {cidr: 10.0.0.0/24}   # PLACEHOLDER: ALB subnet(s)
+      ports:
+        - {protocol: TCP, port: 8080}
+  egress:
+    # DNS to CoreDNS only. Limitation: DNS itself can be abused for tunnelling; use Route 53 Resolver DNS Firewall.
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    # RDS PostgreSQL: NetworkPolicy cannot select RDS by name; use the DB subnet CIDR.
+    # Also enforce at the RDS security group (source = node/pod SG) - defence in depth.
+    - to:
+        - ipBlock: {cidr: 10.0.20.0/24}  # PLACEHOLDER: RDS subnets
+      ports:
+        - {protocol: TCP, port: 5432}
+    # AWS APIs (Secrets Manager, KMS, STS, event stream) via VPC interface endpoints only.
+    - to:
+        - ipBlock: {cidr: 10.0.30.0/24}  # PLACEHOLDER: VPC endpoint subnets
+      ports:
+        - {protocol: TCP, port: 443}
+    # Third-party KYC provider. STANDARD NetworkPolicy CANNOT filter by FQDN. We therefore allow 443 only to a
+    # dedicated egress-proxy/NAT subnet; the domain allow-list is enforced THERE (AWS Network Firewall / proxy),
+    # or via Cilium FQDN policy if that CNI is chosen. This policy alone does NOT restrict which hosts are reachable.
+    - to:
+        - ipBlock: {cidr: 10.0.40.0/24}  # PLACEHOLDER: egress proxy / Network Firewall subnet
+      ports:
+        - {protocol: TCP, port: 443}

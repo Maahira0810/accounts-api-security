@@ -1,0 +1,86 @@
+# Kyverno ClusterPolicy (preventative, admission-time). Addresses T02, T03, T04, T10, T11.
+# NOT executed locally (Kyverno unavailable here). scripts/policy_check.py mirrors these rules (WS-01..WS-12).
+# Needs Kyverno >= 1.10 installed in the cluster. Test with `kyverno test` / `kyverno apply` where available.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-workload-security
+  annotations:
+    policies.kyverno.io/title: Require workload security baseline
+    policies.kyverno.io/description: >-
+      Rejects Pods that are root, privileged, writable-rootfs, unlimited, tag-pinned, or host-namespaced.
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: pod-level-controls
+      match:
+        any:
+          - resources: {kinds: [Pod], namespaces: [accounts]}
+      validate:
+        message: "WS-09..WS-12: dedicated SA, no token automount, no host namespaces, no hostPath."
+        pattern:
+          spec:
+            automountServiceAccountToken: false
+            =(hostNetwork): false
+            =(hostPID): false
+            =(hostIPC): false
+            serviceAccountName: "!default"
+    - name: no-hostpath
+      match:
+        any:
+          - resources: {kinds: [Pod], namespaces: [accounts]}
+      validate:
+        message: "WS-12: hostPath volumes are forbidden."
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.spec.volumes[?hostPath] | length(@) }}"
+                operator: GreaterThan
+                value: 0
+    - name: container-controls
+      match:
+        any:
+          - resources: {kinds: [Pod], namespaces: [accounts]}
+      validate:
+        message: "WS-01..WS-08: non-root, no priv-esc, drop ALL, seccomp, read-only rootfs, resources, not privileged."
+        foreach:
+          - list: "request.object.spec.containers"
+            pattern:
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                =(privileged): false
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests: {cpu: "?*", memory: "?*"}
+                limits: {cpu: "?*", memory: "?*"}
+    - name: pod-seccomp-nonroot
+      match:
+        any:
+          - resources: {kinds: [Pod], namespaces: [accounts]}
+      validate:
+        message: "WS-01/WS-04: runAsNonRoot true and seccomp RuntimeDefault (pod level)."
+        pattern:
+          spec:
+            securityContext:
+              runAsNonRoot: true
+              seccompProfile:
+                type: "RuntimeDefault | Localhost"
+    - name: require-image-digest
+      match:
+        any:
+          - resources: {kinds: [Pod], namespaces: [accounts]}
+      validate:
+        message: "WS-08: images must be pinned by @sha256 digest."
+        foreach:
+          - list: "request.object.spec.containers"
+            deny:
+              conditions:
+                all:
+                  - key: "{{ element.image }}"
+                    operator: NotEquals
+                    value: "*@sha256:*"
+# DEFERRED (not implemented): verifyImages rule to enforce cosign signature + provenance attestation at admission (T04).
+# Initcontainers/ephemeralContainers are covered by scripts/policy_check.py but would need extra foreach rules here.

@@ -1,0 +1,19 @@
+# Copy one entry into waivers/waivers.yaml via pull request. Do not edit this template.
+waivers:
+  - id: W-2026-001
+    threat_id: T03                       # must be T01..T11
+    resource: k8s/accounts-api.yaml#Deployment/accounts-api
+    justification: "Why the control cannot be met now and the business impact of not waiving."
+    evidence: "Link to ticket / design doc / scan output proving the need."
+    requester: alice                     # GitHub handle of author
+    approver: bob                        # independent security approver (not requester/owner)
+    owner: carol                         # accountable for remediation
+    compensating_controls:
+      - "Runtime alert on unexpected egress from this pod"
+    created: 2026-01-01
+    expires: 2026-01-31                  # max 30 days after created (7 for break_glass)
+    # Optional / conditional:
+    permanent_fix_ticket: SEC-123        # REQUIRED once the same threat+resource is waived 3 times
+    break_glass: false                   # if true: also need incident: INC-xxxx and retro_review_due
+    # incident: INC-4567
+    # retro_review_due: 2026-01-05

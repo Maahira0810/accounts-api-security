@@ -1,0 +1,2 @@
+# Pinned version. Deferred: generate hashes (pip-compile --generate-hashes) and use --require-hashes in CI.
+PyYAML==6.0.2

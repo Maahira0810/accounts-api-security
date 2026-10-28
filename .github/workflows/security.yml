@@ -1,0 +1,81 @@
+# Security gates. Addresses T04, T05, T07, T10, T11. Not executed locally (GitHub-hosted); see evidence/VALIDATION.md.
+name: security
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read            # least privilege; no job needs write, id-token, or packages
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  policy-and-waiver-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: python3 -m pip install -r requirements.txt
+      - name: Unit and fixture tests
+        run: python3 -m unittest discover -s policy-tests -v
+      - name: Workload policy (placeholder digest allowed in repo, forbidden in release)
+        run: python3 scripts/policy_check.py k8s/accounts-api.yaml
+      - name: NetworkPolicy default-deny
+        run: python3 scripts/policy_check.py --netpol k8s/network-policy.yaml
+      - name: Waivers (fails on invalid or EXPIRED waivers)
+        run: python3 scripts/waiver_check.py
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0, persist-credentials: false}
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Organisation repos need a gitleaks licence key stored as an Actions secret.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  iac-and-vuln-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - name: IaC + Kubernetes misconfiguration scan (fails on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: Dependency vulnerability scan (fails on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+  terraform-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+        working-directory: terraform
+      - run: terraform init -backend=false -input=false
+        working-directory: terraform
+      - run: terraform validate
+        working-directory: terraform
+# Release-time (NOT in this repo's workflow; see DECISIONS.md D07): build -> push by digest -> SBOM -> cosign sign
+# (keyless, GitHub OIDC) -> provenance attestation -> `policy_check.py --strict` on the digest-substituted manifest.
+# That job would need `id-token: write` + `packages/ECR` access scoped to that job only.
+# Action refs use major/minor tags. Production hardening: pin to full commit SHAs verified by your org (Dependabot/pinact).

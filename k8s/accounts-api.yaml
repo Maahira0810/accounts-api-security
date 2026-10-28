@@ -1,0 +1,106 @@
+# Hardened accounts-api workload. Addresses T02, T03, T04, T07 (see DECISIONS.md).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: accounts
+  labels:
+    pod-security.kubernetes.io/enforce: restricted   # built-in PSA as a second, independent layer
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: accounts-api
+  namespace: accounts
+  annotations:
+    # IRSA role (see terraform/iam_workload.tf). Placeholder account ID - replace in deploy pipeline.
+    eks.amazonaws.com/role-arn: arn:aws:iam::111111111111:role/accounts-api-workload
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: accounts-api
+  namespace: accounts
+  labels:
+    app.kubernetes.io/name: accounts-api
+spec:
+  replicas: 3
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: accounts-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: accounts-api
+    spec:
+      serviceAccountName: accounts-api
+      # Pod identity comes from IRSA (projected web-identity token below), NOT the
+      # Kubernetes API token, so the API token stays unmounted (T02, T03).
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: accounts-api
+          # PLACEHOLDER DIGEST (all zeros). The release pipeline must substitute the real digest
+          # produced by the build. `policy_check.py --strict` fails while this placeholder remains.
+          image: 111111111111.dkr.ecr.ap-south-1.amazonaws.com/accounts-api@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            allowPrivilegeEscalation: false
+            privileged: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          env:
+            - name: AWS_REGION
+              value: ap-south-1
+            # No secret values here. DB/KYC credentials are fetched at runtime from
+            # Secrets Manager using the IRSA role (T07).
+            - name: DB_SECRET_ID
+              value: accounts-api/prod/db
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: accounts-api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: accounts-api
+  namespace: accounts
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: accounts-api
+  ports:
+    - {name: http, port: 80, targetPort: http}

@@ -1,0 +1,4 @@
+# Active security waivers. Empty by design. See DECISIONS.md "Waiver mechanism".
+# Every change to this file requires CODEOWNERS (security) approval.
+# Template: waivers/WAIVER_TEMPLATE.yaml
+waivers: []

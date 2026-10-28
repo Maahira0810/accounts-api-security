@@ -1,0 +1,8 @@
+# Enforced only with branch protection "Require review from Code Owners". Team names are placeholders.
+*                          @example-org/platform-team
+/waivers/                  @example-org/security-team
+/k8s/policies/             @example-org/security-team
+/policy-tests/             @example-org/security-team
+/scripts/                  @example-org/security-team
+/.github/                  @example-org/security-team
+/terraform/                @example-org/platform-team @example-org/security-team

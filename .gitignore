@@ -1,0 +1,36 @@
+# Secrets and credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+credentials*
+*.kubeconfig
+kubeconfig*
+secrets.yaml
+secrets.*.yaml
+# Terraform local state and plans
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan*
+crash.log
+*.tfvars
+!example.tfvars
+.terraformrc
+terraform.rc
+# Generated artifacts
+__pycache__/
+*.pyc
+dist/
+build/
+*.zip
+*.sarif
+sbom*.json
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
